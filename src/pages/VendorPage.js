@@ -94,6 +94,30 @@ function computePrepSuggestions(menuItems, orders) {
   return suggestions;
 }
 
+// ✅ helper: allow only valid forward transitions
+function canTransition(currentStatus, newStatus) {
+  switch (currentStatus) {
+    case "Prebooked":
+      // can go to Preparing or Ready or Completed directly if needed
+      return (
+        newStatus === "Preparing" ||
+        newStatus === "Ready" ||
+        newStatus === "Completed"
+      );
+    case "Preparing":
+      // can only move forward to Ready or Completed
+      return newStatus === "Ready" || newStatus === "Completed";
+    case "Ready":
+      // can only move forward to Completed
+      return newStatus === "Completed";
+    case "Completed":
+    case "Cancelled":
+    default:
+      // no further changes allowed
+      return false;
+  }
+}
+
 export default function VendorPage() {
   const { user, profile } = useAuth();
   const [orders, setOrders] = useState([]);
@@ -118,10 +142,17 @@ export default function VendorPage() {
     return () => unsub();
   }, []);
 
-  // Update order status
-  const updateStatus = async (orderId, newStatus) => {
+  // Update order status (with guard)
+  const updateStatus = async (order, newStatus) => {
+    if (!canTransition(order.status, newStatus)) {
+      console.warn(
+        `Blocked invalid transition: ${order.status} → ${newStatus}`
+      );
+      return;
+    }
+
     try {
-      const d = doc(db, "orders", orderId);
+      const d = doc(db, "orders", order.id);
       await updateDoc(d, {
         status: newStatus,
         updatedAt: serverTimestamp()
@@ -291,6 +322,14 @@ export default function VendorPage() {
       ) : (
         activeOrders.map((o) => {
           const payment = o.paymentStatus || "Pending";
+
+          // 🔒 Button enable/disable rules
+          const canMarkPreparing = canTransition(o.status, "Preparing");
+          const canMarkReady = canTransition(o.status, "Ready");
+          const canMarkCompleted = canTransition(o.status, "Completed");
+          const isFinal =
+            o.status === "Completed" || o.status === "Cancelled";
+
           return (
             <div className="order-card" key={o.id}>
               <div>
@@ -328,23 +367,38 @@ export default function VendorPage() {
               <div className="vendor-actions">
                 <button
                   className="btn"
-                  onClick={() => updateStatus(o.id, "Preparing")}
+                  disabled={!canMarkPreparing}
+                  style={{
+                    opacity: canMarkPreparing ? 1 : 0.4,
+                    cursor: canMarkPreparing ? "pointer" : "not-allowed"
+                  }}
+                  onClick={() => updateStatus(o, "Preparing")}
                 >
                   Mark Preparing
                 </button>
                 <button
                   className="btn"
-                  onClick={() => updateStatus(o.id, "Ready")}
+                  disabled={!canMarkReady}
+                  style={{
+                    opacity: canMarkReady ? 1 : 0.4,
+                    cursor: canMarkReady ? "pointer" : "not-allowed"
+                  }}
+                  onClick={() => updateStatus(o, "Ready")}
                 >
                   Mark Ready
                 </button>
                 <button
                   className="btn danger"
-                  onClick={() => updateStatus(o.id, "Completed")}
+                  disabled={!canMarkCompleted}
+                  style={{
+                    opacity: canMarkCompleted ? 1 : 0.4,
+                    cursor: canMarkCompleted ? "pointer" : "not-allowed"
+                  }}
+                  onClick={() => updateStatus(o, "Completed")}
                 >
                   Mark Completed
                 </button>
-                {payment !== "Paid" && o.status !== "Cancelled" && (
+                {payment !== "Paid" && o.status !== "Cancelled" && !isFinal && (
                   <button
                     className="btn"
                     onClick={() => markPaidCash(o)}
