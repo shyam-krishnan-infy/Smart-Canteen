@@ -31,48 +31,52 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ maxWidth: 380, margin: "60px auto", padding: "0 16px" }}>
-      <h1>Login</h1>
+    <div className="app-shell">
+      <div className="login-wrapper">
+        <div className="login-card">
+          <div className="login-title">Smart Canteen</div>
+          <div className="login-subtitle">
+            Sign in with your office canteen account to continue.
+          </div>
 
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: 10 }}
-      >
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ padding: 10, borderRadius: 6, border: "1px solid #ccc" }}
-        />
+          <form className="login-form" onSubmit={handleSubmit}>
+            <input
+              type="email"
+              className="input"
+              placeholder="Work email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
 
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ padding: 10, borderRadius: 6, border: "1px solid #ccc" }}
-        />
+            <input
+              type="password"
+              className="input"
+              placeholder="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
 
-        <button
-          type="submit"
-          style={{
-            padding: 10,
-            borderRadius: 8,
-            border: "none",
-            background: "#0366d6",
-            color: "#fff",
-            fontWeight: 600,
-            cursor: "pointer"
-          }}
-        >
-          Sign In
-        </button>
-      </form>
+            <button type="submit" className="btn" style={{ marginTop: 6 }}>
+              Sign In
+            </button>
+          </form>
 
-      {error && (
-        <div style={{ color: "red", marginTop: 10, fontSize: 13 }}>{error}</div>
-      )}
+          {error && (
+            <div
+              style={{
+                color: "#b91c1c",
+                marginTop: 10,
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              {error}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

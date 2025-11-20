@@ -1,13 +1,639 @@
+/* src/index.css */
+/* ---------- Global Theme (Minimal Blue) ---------- */
+
+:root {
+  --primary: #0366d6;
+  --primary-soft: #e1efff;
+  --primary-soft-strong: #c3ddff;
+  --accent: #0ea5e9;
+
+  --bg-body: #f3f4f8;
+  --bg-surface: #ffffff;
+  --bg-soft: #f9fafb;
+
+  --border-subtle: #e1e4e8;
+  --border-strong: #cbd5e1;
+
+  --text-main: #111827;
+  --text-muted: #6b7280;
+  --text-soft: #9ca3af;
+
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+
+  --shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --shadow-subtle: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans",
+    "Helvetica Neue", sans-serif;
+  color: var(--text-main);
+  background: radial-gradient(circle at top left, #e0f2ff 0, #f3f4f8 45%, #eef2ff 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* Root app wrapper (optional, but keeps content nicely centered) */
+#root {
+  min-height: 100vh;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.app-shell {
+  width: 100%;
+  max-width: 1120px;
+  margin: 24px auto 32px;
+  padding: 18px 20px 32px;
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), #f9fafb);
+  box-shadow: var(--shadow-soft);
+}
+
+/* ---------- Typography ---------- */
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.page-title {
+  font-size: 28px;
+  margin-bottom: 4px;
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 24px 0 10px;
+}
+
+/* ---------- Layout helpers ---------- */
+
+.container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 8px 0 24px;
+}
+
+.section {
+  margin-top: 24px;
+}
+
+/* Subtle info / alert banners */
+.info-banner {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-soft-strong);
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.info-banner.muted {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+  color: var(--text-muted);
+}
+
+/* ---------- Cards ---------- */
+
+.card,
+.menu-card,
+.order-card {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  box-shadow: var(--shadow-subtle);
+  padding: 16px 18px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease,
+    border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.card:hover,
+.menu-card:hover,
+.order-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
+  border-color: rgba(59, 130, 246, 0.35);
+  background: #ffffff;
+}
+
+/* Generic vertical stack inside cards */
+.card-header {
+  margin-bottom: 8px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.card-value {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+/* Grid for dashboards / summaries */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.14s ease, box-shadow 0.14s ease,
+    transform 0.06s ease, border-color 0.14s ease, color 0.14s ease;
+  text-decoration: none; /* also works for <Link> */
+}
+
+.btn:hover {
+  background: #0251aa;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.32);
+  transform: translateY(-0.5px);
+}
+
+.btn:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+}
+
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Button variants */
+.btn.outline {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-main);
+}
+
+.btn.outline:hover {
+  background: #f3f4ff;
+  border-color: #93c5fd;
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--primary);
+  padding-inline: 12px;
+}
+
+.btn.ghost:hover {
+  background: #e5f0ff;
+}
+
+.btn.danger {
+  background: #dc2626;
+}
+
+.btn.danger:hover {
+  background: #b91c1c;
+}
+
+/* ---------- Text helpers ---------- */
+
+.muted {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.small {
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+/* ---------- Status & Payment chips ---------- */
+
+.status-badge,
+.payment-badge,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Reuse same base class for compatibility */
+.status-badge {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+/* Prebooked */
+.status-prebooked {
+  background: #e0f2ff;
+  color: #0366d6;
+}
+
+/* Preparing */
+.status-preparing {
+  background: #fff7d6;
+  color: #854d0e;
+}
+
+/* Ready */
+.status-ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
+/* Completed */
+.status-completed {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+/* Cancelled */
+.status-cancelled {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Payment chips */
+.payment-pending {
+  background: #fff7d6;
+  color: #854d0e;
+}
+
+.payment-paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.payment-refunded {
+  background: #e0f2ff;
+  color: #0366d6;
+}
+
+/* ---------- Lists / grids ---------- */
+
+.menu-list,
+.my-orders {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+/* Wider screens: 2 columns for menu cards, 1 column for orders */
+@media (min-width: 768px) {
+  .menu-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.menu-card,
+.order-card {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.menu-left {
+  flex-shrink: 0;
+}
+
+.menu-thumb {
+  width: 110px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: #e5e7eb;
+}
+
+.menu-main h2 {
+  margin: 0 0 6px 0;
+  font-size: 16px;
+}
+
+.menu-main p {
+  margin: 2px 0;
+}
+
+.menu-action,
+.vendor-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* ---------- Tables (Admin / Vendor Orders) ---------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+th {
+  background: #f3f4f6;
+  font-weight: 600;
+  color: #4b5563;
+  text-align: left;
+}
+
+/* ---------- Auth / top bar ---------- */
+
+.top-bar {
+  margin-bottom: 18px;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+/* ---------- Login specific ---------- */
+
+.login-wrapper {
+  max-width: 380px;
+  margin: 40px auto;
+}
+
+.login-card {
+  background: var(--bg-surface);
+  border-radius: 24px;
+  padding: 24px 22px 20px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: var(--shadow-soft);
+}
+
+.login-title {
+  font-size: 24px;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.input {
+  padding: 9px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: #f9fafb;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease,
+    background-color 0.14s ease;
+}
+
+.input:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.4);
+  background: #ffffff;
+}
+
+/* ---------- Small utility spacing ---------- */
+
+.mt-8 {
+  margin-top: 8px;
+}
+
+.mt-12 {
+  margin-top: 12px;
+}
+
+.mt-16 {
+  margin-top: 16px;
+}
+
+/* Stronger readable stats */
+.card ul li,
+.card .small {
+  color: #374151 !important; /* Darker gray for readability */
+  font-size: 14px !important;
+}
+
+/* Make the label (e.g., Prebooked) darker */
+.card ul li span.chip {
+  color: #1f2937 !important;  /* Dark text */
+  font-weight: 600 !important;
+}
+
+/* ---------- Metric cards with icons ---------- */
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.metric-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: #e5edff;
+  color: #1d4ed8;
+}
+
+/* ---------- Pills / tabs (status filter) ---------- */
+
+.pill-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 10px;
+}
+
+.pill-tab {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pill-tab-count {
+  font-weight: 600;
+  color: #111827;
+}
+
+.pill-tab.active {
+  background: #e0edff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.25);
+}
+
+/* ---------- Simple bar chart (SLA + Top Items) ---------- */
+
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bar-label {
+  min-width: 120px;
+}
+
+.bar-label-main {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.bar-label-sub {
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.bar-track {
+  flex: 1;
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.bar-fill {
+  position: absolute;
+  inset: 0;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #0ea5e9);
+  transition: width 0.25s ease-out;
+}
+
+.bar-value {
+  min-width: 46px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+}
+
+/* ---------- Demand heatmap ---------- */
+
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: 90px repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  font-size: 12px;
+}
+
+.heatmap-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.heatmap-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.heatmap-cell {
+  padding: 6px 8px;
+  border-radius: 10px;
+  text-align: center;
+  background: #e5e7eb;
+  color: #111827;
 }

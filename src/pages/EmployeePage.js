@@ -9,12 +9,31 @@ import {
   where,
   serverTimestamp,
   updateDoc,
-  doc
+  doc,
 } from "firebase/firestore";
 import "./EmployeePage.css";
 import { useAuth } from "../AuthContext";
 import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
+
+// ---- Time-of-day meal window helper ----
+// Adjust ranges if you want exact boundaries:
+// Here we use:
+// 07:00–11:59 → Breakfast
+// 12:00–15:59 → Lunch
+// 16:00–18:59 → Snacks
+// 19:00–22:59 → Dinner
+function getCurrentMealWindow() {
+  const now = new Date();
+  const hour = now.getHours(); // 0–23
+
+  if (hour >= 7 && hour < 12) return "Breakfast";
+  if (hour >= 12 && hour < 16) return "Lunch";
+  if (hour >= 16 && hour < 19) return "Snacks";
+  if (hour >= 19 && hour < 23) return "Dinner";
+
+  return null; // outside main windows, show everything
+}
 
 // Helper: interpret different representations of "available"
 function isItemAvailable(item) {
@@ -54,15 +73,13 @@ function computeQueueEstimate(orders) {
   return {
     activeCount: active.length,
     estMinutes,
-    etaString: eta.toLocaleTimeString()
+    etaString: eta.toLocaleTimeString(),
   };
 }
 
 export default function EmployeePage() {
   const { user, profile } = useAuth();
 
-  // This is the ID we will use to tie orders to the employee
-  // Prefer profile.employeeId if you set it in Firestore; otherwise fall back to email / uid
   const derivedUserId =
     profile?.employeeId || user?.email || user?.uid || "";
 
@@ -72,10 +89,32 @@ export default function EmployeePage() {
   const [notif, setNotif] = useState("");
   const prevStatuses = useRef({});
 
-  // Keep userId in sync with auth profile
+  // Category tabs + time-of-day window
+  const CATEGORY_TABS = [
+    "All",
+    "Breakfast",
+    "Lunch",
+    "Snacks",
+    "Dinner",
+    "Other",
+  ];
+  const mealWindow = getCurrentMealWindow(); // e.g. "Breakfast" or null
+
+  const [categoryFilter, setCategoryFilter] = useState(
+    mealWindow || "All"
+  );
+
+  // Keep userId in sync
   useEffect(() => {
     setUserId(derivedUserId);
   }, [derivedUserId]);
+
+  // If time window changes on reload, align filter to it
+  useEffect(() => {
+    if (mealWindow) {
+      setCategoryFilter(mealWindow);
+    }
+  }, [mealWindow]);
 
   // load menu items
   useEffect(() => {
@@ -107,12 +146,14 @@ export default function EmployeePage() {
       q,
       (snap) => {
         const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        // newest first
         arr.sort((a, b) => {
           const at = a.createdAt?.seconds || 0;
           const bt = b.createdAt?.seconds || 0;
           return bt - at;
         });
 
+        // detect status changes → notification
         snap.docChanges().forEach((change) => {
           if (change.type === "modified") {
             const data = change.doc.data();
@@ -166,7 +207,7 @@ export default function EmployeePage() {
         paymentStatus: "Pending",
         date: todayDateString,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
 
       setNotif(`Pre-booked "${item.name}" successfully. Track it below.`);
@@ -192,7 +233,7 @@ export default function EmployeePage() {
       await updateDoc(ref, {
         status: "Cancelled",
         paymentStatus: newPaymentStatus,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
       setNotif(`Cancelled "${order.name}".`);
     } catch (err) {
@@ -216,7 +257,7 @@ export default function EmployeePage() {
       const ref = doc(db, "orders", order.id);
       await updateDoc(ref, {
         paymentStatus: "Paid",
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
       setNotif(`Payment successful for "${order.name}" (demo).`);
     } catch (err) {
@@ -225,11 +266,24 @@ export default function EmployeePage() {
     }
   };
 
-  // AI recommendations
+  // Decide effective category filter:
+  // - If within a meal window, we lock to that (Breakfast/Lunch/Snacks/Dinner).
+  // - Otherwise, use user's chosen filter.
+  const effectiveFilter = mealWindow || categoryFilter;
+
+  // AI recommendations (restricted to effectiveFilter)
   const recommendedItems = (() => {
     if (!menuItems.length) return [];
 
-    const availableMenu = menuItems.filter((item) => isItemAvailable(item));
+    let availableMenu = menuItems.filter((item) => isItemAvailable(item));
+
+    if (effectiveFilter !== "All") {
+      availableMenu = availableMenu.filter((item) => {
+        const cat = item.category || "Other";
+        return cat === effectiveFilter;
+      });
+    }
+
     if (!availableMenu.length) return [];
 
     if (!orders.length) {
@@ -250,7 +304,7 @@ export default function EmployeePage() {
       const priceBonus = 1 / (1 + price);
       return {
         item,
-        score: userCount + priceBonus
+        score: userCount + priceBonus,
       };
     });
 
@@ -259,6 +313,19 @@ export default function EmployeePage() {
   })();
 
   const queueEstimate = computeQueueEstimate(orders);
+
+  // Filter menu items for display
+  const filteredMenuItems = menuItems.filter((item) => {
+    if (effectiveFilter === "All") return true;
+    const cat = item.category || "Other";
+    return cat === effectiveFilter;
+  });
+
+  const now = new Date();
+  const currentTimeLabel = now.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
     <div className="employee-page container">
@@ -272,7 +339,7 @@ export default function EmployeePage() {
             background: "#e0f2ff",
             color: "#0366d6",
             fontSize: 14,
-            fontWeight: 500
+            fontWeight: 500,
           }}
         >
           {notif}
@@ -291,7 +358,7 @@ export default function EmployeePage() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          flexWrap: "wrap"
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -308,6 +375,38 @@ export default function EmployeePage() {
         </button>
       </div>
 
+      {/* Time window info */}
+      {mealWindow ? (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: "8px 12px",
+            borderRadius: 8,
+            border: "1px solid #d1fae5",
+            background: "#ecfdf5",
+            fontSize: 13,
+          }}
+        >
+          Current time: <strong>{currentTimeLabel}</strong>.{" "}
+          <strong>{mealWindow}</strong> window is active now. Only{" "}
+          {mealWindow} items can be ordered. Other categories are disabled.
+        </div>
+      ) : (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: "8px 12px",
+            borderRadius: 8,
+            border: "1px solid #fef3c7",
+            background: "#fffbeb",
+            fontSize: 13,
+          }}
+        >
+          Current time: <strong>{currentTimeLabel}</strong>. No specific meal
+          window is active; you can browse all categories.
+        </div>
+      )}
+
       {/* AI Queue-Time Estimator */}
       {userId && queueEstimate && (
         <div
@@ -316,7 +415,7 @@ export default function EmployeePage() {
             padding: "10px 14px",
             borderRadius: 8,
             border: "1px solid #d0e2ff",
-            background: "#f3f8ff"
+            background: "#f3f8ff",
           }}
         >
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
@@ -360,9 +459,9 @@ export default function EmployeePage() {
                     <p>Price: ₹{item.price}</p>
                     <p>
                       Available:{" "}
-                        <strong style={{ color: available ? "#0a0" : "#c00" }}>
-                          {available ? "Yes" : "No"}
-                        </strong>
+                      <strong style={{ color: available ? "#0a0" : "#c00" }}>
+                        {available ? "Yes" : "No"}
+                      </strong>
                     </p>
                   </div>
                   <div className="menu-action">
@@ -372,7 +471,7 @@ export default function EmployeePage() {
                       style={{
                         opacity: available && userId ? 1 : 0.4,
                         cursor:
-                          available && userId ? "pointer" : "not-allowed"
+                          available && userId ? "pointer" : "not-allowed",
                       }}
                       onClick={() => handlePrebook(item)}
                     >
@@ -386,51 +485,110 @@ export default function EmployeePage() {
         </>
       )}
 
+      {/* Category tabs + menu */}
       <h1>Menu</h1>
-      <div className="menu-list">
-        {menuItems.map((item) => {
-          const available = isItemAvailable(item);
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          margin: "8px 0 16px",
+          overflowX: "auto",
+        }}
+      >
+        {CATEGORY_TABS.map((cat) => {
+          const isActive = effectiveFilter === cat;
+          const catIsMeal =
+            ["Breakfast", "Lunch", "Snacks", "Dinner"].includes(cat);
+          const disabled =
+            mealWindow && catIsMeal && cat !== mealWindow
+              ? true
+              : false;
+          const isAllDisabled = mealWindow && cat === "All";
+
+          const actuallyDisabled = disabled || isAllDisabled;
+
           return (
-            <div key={item.id} className="menu-card">
-              <div className="menu-left">
-                {item.image ? (
-                  <img
-                    src={item.image}
-                    alt={item.name}
-                    className="menu-thumb"
-                  />
-                ) : null}
-              </div>
-              <div className="menu-main">
-                <h2>{item.name}</h2>
-                <p>Price: ₹{item.price}</p>
-                <p>
-                  Available:{" "}
-                  <strong style={{ color: available ? "#0a0" : "#c00" }}>
-                    {available ? "Yes" : "No"}
-                  </strong>
-                </p>
-              </div>
-              <div className="menu-action">
-                <button
-                  className="btn"
-                  disabled={!available || !userId}
-                  style={{
-                    opacity: available && userId ? 1 : 0.4,
-                    cursor:
-                      available && userId ? "pointer" : "not-allowed"
-                  }}
-                  onClick={() => handlePrebook(item)}
-                >
-                  Pre-book
-                </button>
-              </div>
-            </div>
+            <button
+              key={cat}
+              onClick={() => {
+                if (actuallyDisabled) return;
+                setCategoryFilter(cat);
+              }}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 999,
+                border: isActive
+                  ? "1px solid #0366d6"
+                  : "1px solid #ddd",
+                background: isActive ? "#e0f2ff" : "#fff",
+                fontSize: 13,
+                cursor: actuallyDisabled ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap",
+                opacity: actuallyDisabled ? 0.4 : 1,
+              }}
+            >
+              {cat}
+            </button>
           );
         })}
       </div>
 
-      <h2>My Orders</h2>
+      <div className="menu-list">
+        {filteredMenuItems.length === 0 ? (
+          <p className="muted">
+            No items found in this category. Try again later or during its
+            active window.
+          </p>
+        ) : (
+          filteredMenuItems.map((item) => {
+            const available = isItemAvailable(item);
+            const cat = item.category || "Other";
+            return (
+              <div key={item.id} className="menu-card">
+                <div className="menu-left">
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      className="menu-thumb"
+                    />
+                  ) : null}
+                </div>
+                <div className="menu-main">
+                  <h2>{item.name}</h2>
+                  <p>Price: ₹{item.price}</p>
+                  <p style={{ fontSize: 12, color: "#777", marginBottom: 4 }}>
+                    {cat}
+                  </p>
+                  <p>
+                    Available:{" "}
+                    <strong style={{ color: available ? "#0a0" : "#c00" }}>
+                      {available ? "Yes" : "No"}
+                    </strong>
+                  </p>
+                </div>
+                <div className="menu-action">
+                  <button
+                    className="btn"
+                    disabled={!available || !userId}
+                    style={{
+                      opacity: available && userId ? 1 : 0.4,
+                      cursor:
+                        available && userId ? "pointer" : "not-allowed",
+                    }}
+                    onClick={() => handlePrebook(item)}
+                  >
+                    Pre-book
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* My orders section */}
+      <h2 style={{ marginTop: 30 }}>My Orders</h2>
       <div className="my-orders">
         {!userId ? (
           <p className="muted">
@@ -439,10 +597,14 @@ export default function EmployeePage() {
             or we will use UID/email.
           </p>
         ) : orders.length === 0 ? (
-          <p className="muted">No orders yet.</p>
+          <p className="muted">No orders yet. Pre-book from the menu above.</p>
         ) : (
           orders.map((o) => {
             const payment = o.paymentStatus || "Pending";
+            const canCancel = canCancelOrder(o);
+            const created =
+              o.createdAt?.toDate && o.createdAt.toDate().toLocaleString();
+
             return (
               <div key={o.id} className="order-card">
                 <div>
@@ -469,31 +631,35 @@ export default function EmployeePage() {
                       {payment}
                     </span>
                   </p>
-                  <small>
-                    Ordered:{" "}
-                    {o.createdAt?.toDate
-                      ? o.createdAt.toDate().toLocaleString()
-                      : "—"}
-                  </small>
+                  {created && (
+                    <small style={{ color: "#777" }}>Created: {created}</small>
+                  )}
                 </div>
-
                 <div className="vendor-actions">
-                  {canCancelOrder(o) && (
-                    <button
-                      className="btn danger"
-                      onClick={() => handleCancelOrder(o)}
-                    >
-                      Cancel Order
-                    </button>
-                  )}
-                  {payment !== "Paid" && o.status !== "Cancelled" && (
-                    <button
-                      className="btn"
-                      onClick={() => handlePayOnline(o)}
-                    >
-                      Pay Online (demo)
-                    </button>
-                  )}
+                  <button
+                    className="btn"
+                    style={{
+                      opacity: canCancel ? 1 : 0.4,
+                      cursor: canCancel ? "pointer" : "not-allowed",
+                    }}
+                    disabled={!canCancel}
+                    onClick={() => handleCancelOrder(o)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn"
+                    style={{
+                      marginLeft: 8,
+                      opacity: payment === "Paid" ? 0.4 : 1,
+                      cursor:
+                        payment === "Paid" ? "not-allowed" : "pointer",
+                    }}
+                    disabled={payment === "Paid"}
+                    onClick={() => handlePayOnline(o)}
+                  >
+                    Pay Online
+                  </button>
                 </div>
               </div>
             );

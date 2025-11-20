@@ -98,22 +98,18 @@ function computePrepSuggestions(menuItems, orders) {
 function canTransition(currentStatus, newStatus) {
   switch (currentStatus) {
     case "Prebooked":
-      // can go to Preparing or Ready or Completed directly if needed
       return (
         newStatus === "Preparing" ||
         newStatus === "Ready" ||
         newStatus === "Completed"
       );
     case "Preparing":
-      // can only move forward to Ready or Completed
       return newStatus === "Ready" || newStatus === "Completed";
     case "Ready":
-      // can only move forward to Completed
       return newStatus === "Completed";
     case "Completed":
     case "Cancelled":
     default:
-      // no further changes allowed
       return false;
   }
 }
@@ -123,7 +119,7 @@ export default function VendorPage() {
   const [orders, setOrders] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
 
-  // Listen to orders
+  // Listen to orders (latest first)
   useEffect(() => {
     const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
@@ -133,7 +129,7 @@ export default function VendorPage() {
     return () => unsub();
   }, []);
 
-  // Listen to menu items
+  // Listen to menu items (used for AI prep suggestions)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "menu"), (snap) => {
       const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -181,19 +177,6 @@ export default function VendorPage() {
     }
   };
 
-  // Toggle item availability
-  const toggleAvailability = async (item) => {
-    try {
-      const ref = doc(db, "menu", item.id);
-      await updateDoc(ref, {
-        available: !item.available
-      });
-    } catch (err) {
-      console.error("Failed to update availability", err);
-      alert("Failed to update availability. Check console.");
-    }
-  };
-
   // Split orders
   const activeOrders = orders.filter(
     (o) => o.status !== "Completed" && o.status !== "Cancelled"
@@ -232,9 +215,11 @@ export default function VendorPage() {
           )}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {/* 👉 Button to Vendor Orders Page */}
           <Link to="/vendor/orders" className="btn">
             View Today&apos;s Orders
+          </Link>
+          <Link to="/vendor/menu" className="btn">
+            Manage Menu
           </Link>
           <button className="btn danger" onClick={() => signOut(auth)}>
             Logout
@@ -242,10 +227,15 @@ export default function VendorPage() {
         </div>
       </div>
 
-      <h1>Vendor — Manage Orders & Menu</h1>
+      <h1>Vendor — AI Kitchen Console</h1>
+      <p className="muted">
+        Use AI suggestions to prepare the right number of plates, and track live
+        orders. Detailed menu editing is available in{" "}
+        <strong>Manage Menu</strong>.
+      </p>
 
       {/* 🔮 AI Prep Suggestions */}
-      <h2>AI Prep Suggestions for Today</h2>
+      <h2 style={{ marginTop: 24 }}>AI Prep Suggestions for Today</h2>
       {prepSuggestions.length === 0 ? (
         <p className="muted">
           Not enough data yet. As orders come in over a few days, AI will start
@@ -265,7 +255,8 @@ export default function VendorPage() {
                   <strong>{s.todayPrebooked}</strong>
                 </p>
                 <p>
-                  Currently active orders: <strong>{s.activeToday}</strong>
+                  Currently active orders:{" "}
+                  <strong>{s.activeToday}</strong>
                 </p>
                 <p>
                   Suggested to prep now:{" "}
@@ -278,183 +269,150 @@ export default function VendorPage() {
         </div>
       )}
 
-      {/* MENU AVAILABILITY SECTION */}
-      <h2 style={{ marginTop: 30 }}>Menu Availability</h2>
-      {menuItems.length === 0 ? (
-        <p className="muted">No menu items found. Add items in Firestore.</p>
-      ) : (
-        <div className="menu-list">
-          {menuItems.map((item) => (
-            <div key={item.id} className="menu-card">
-              <div className="menu-left">
-                {item.image ? (
-                  <img
-                    src={item.image}
-                    alt={item.name}
-                    className="menu-thumb"
-                  />
-                ) : null}
-              </div>
-              <div className="menu-main">
-                <h2>{item.name}</h2>
-                <p>Price: ₹{item.price}</p>
-                <p>
-                  Available:{" "}
-                  <strong style={{ color: item.available ? "#0a0" : "#c00" }}>
-                    {item.available ? "Yes" : "No"}
-                  </strong>
-                </p>
-              </div>
-              <div className="vendor-actions">
-                <button className="btn" onClick={() => toggleAvailability(item)}>
-                  {item.available ? "Mark Unavailable" : "Mark Available"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ORDERS SECTION */}
+      {/* Active orders */}
       <h2 style={{ marginTop: 30 }}>Active Orders</h2>
       {activeOrders.length === 0 ? (
         <p className="muted">No active orders right now.</p>
       ) : (
-        activeOrders.map((o) => {
-          const payment = o.paymentStatus || "Pending";
+        <div className="my-orders">
+          {activeOrders.map((o) => {
+            const payment = o.paymentStatus || "Pending";
 
-          // 🔒 Button enable/disable rules
-          const canMarkPreparing = canTransition(o.status, "Preparing");
-          const canMarkReady = canTransition(o.status, "Ready");
-          const canMarkCompleted = canTransition(o.status, "Completed");
-          const isFinal =
-            o.status === "Completed" || o.status === "Cancelled";
+            const canMarkPreparing = canTransition(o.status, "Preparing");
+            const canMarkReady = canTransition(o.status, "Ready");
+            const canMarkCompleted = canTransition(o.status, "Completed");
 
-          return (
-            <div className="order-card" key={o.id}>
-              <div>
-                <h3>{o.name}</h3>
-                <p>Price: ₹{o.price}</p>
-                <p>Employee: {o.userId}</p>
-                <p>
-                  Status:{" "}
-                  <span
-                    className={
-                      "status-badge status-" +
-                      (o.status ? o.status.toLowerCase() : "completed")
-                    }
-                  >
-                    {o.status}
-                  </span>
-                </p>
-                <p>
-                  Payment:{" "}
-                  <span
-                    className={
-                      "status-badge payment-" + payment.toLowerCase()
-                    }
-                  >
-                    {payment}
-                  </span>
-                </p>
-                <small>
-                  Created:{" "}
-                  {o.createdAt?.toDate
-                    ? o.createdAt.toDate().toLocaleString()
-                    : "—"}
-                </small>
-              </div>
-              <div className="vendor-actions">
-                <button
-                  className="btn"
-                  disabled={!canMarkPreparing}
-                  style={{
-                    opacity: canMarkPreparing ? 1 : 0.4,
-                    cursor: canMarkPreparing ? "pointer" : "not-allowed"
-                  }}
-                  onClick={() => updateStatus(o, "Preparing")}
-                >
-                  Mark Preparing
-                </button>
-                <button
-                  className="btn"
-                  disabled={!canMarkReady}
-                  style={{
-                    opacity: canMarkReady ? 1 : 0.4,
-                    cursor: canMarkReady ? "pointer" : "not-allowed"
-                  }}
-                  onClick={() => updateStatus(o, "Ready")}
-                >
-                  Mark Ready
-                </button>
-                <button
-                  className="btn danger"
-                  disabled={!canMarkCompleted}
-                  style={{
-                    opacity: canMarkCompleted ? 1 : 0.4,
-                    cursor: canMarkCompleted ? "pointer" : "not-allowed"
-                  }}
-                  onClick={() => updateStatus(o, "Completed")}
-                >
-                  Mark Completed
-                </button>
-                {payment !== "Paid" && o.status !== "Cancelled" && !isFinal && (
+            return (
+              <div className="order-card" key={o.id}>
+                <div>
+                  <h3>{o.name}</h3>
+                  <p>Price: ₹{o.price}</p>
+                  <p>Employee: {o.userId}</p>
+                  <p>
+                    Status:{" "}
+                    <span
+                      className={
+                        "status-badge status-" +
+                        (o.status ? o.status.toLowerCase() : "completed")
+                      }
+                    >
+                      {o.status}
+                    </span>
+                  </p>
+                  <p>
+                    Payment:{" "}
+                    <span
+                      className={
+                        "status-badge payment-" + payment.toLowerCase()
+                      }
+                    >
+                      {payment}
+                    </span>
+                  </p>
+                  <small>
+                    Created:{" "}
+                    {o.createdAt?.toDate
+                      ? o.createdAt.toDate().toLocaleString()
+                      : "—"}
+                  </small>
+                </div>
+                <div className="vendor-actions">
                   <button
                     className="btn"
-                    onClick={() => markPaidCash(o)}
+                    disabled={!canMarkPreparing}
+                    style={{
+                      opacity: canMarkPreparing ? 1 : 0.4,
+                      cursor: canMarkPreparing ? "pointer" : "not-allowed"
+                    }}
+                    onClick={() => updateStatus(o, "Preparing")}
                   >
-                    Mark Paid (Cash)
+                    Mark Preparing
                   </button>
-                )}
+                  <button
+                    className="btn"
+                    disabled={!canMarkReady}
+                    style={{
+                      opacity: canMarkReady ? 1 : 0.4,
+                      cursor: canMarkReady ? "pointer" : "not-allowed"
+                    }}
+                    onClick={() => updateStatus(o, "Ready")}
+                  >
+                    Mark Ready
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={!canMarkCompleted}
+                    style={{
+                      opacity: canMarkCompleted ? 1 : 0.4,
+                      cursor: canMarkCompleted
+                        ? "pointer"
+                        : "not-allowed"
+                    }}
+                    onClick={() => updateStatus(o, "Completed")}
+                  >
+                    Mark Completed
+                  </button>
+                  {payment !== "Paid" && o.status !== "Cancelled" && (
+                    <button
+                      className="btn"
+                      onClick={() => markPaidCash(o)}
+                    >
+                      Mark Paid (Cash)
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })
+            );
+          })}
+        </div>
       )}
 
+      {/* Completed / cancelled */}
       <h2 style={{ marginTop: 30 }}>Completed / Cancelled Orders</h2>
       {completedOrders.length === 0 ? (
         <p className="muted">No completed or cancelled orders yet.</p>
       ) : (
-        completedOrders.map((o) => {
-          const payment = o.paymentStatus || "Pending";
-          return (
-            <div className="order-card" key={o.id}>
-              <div>
-                <h3>{o.name}</h3>
-                <p>Price: ₹{o.price}</p>
-                <p>Employee: {o.userId}</p>
-                <p>
-                  Status:{" "}
-                  <span
-                    className={
-                      "status-badge status-" +
-                      (o.status ? o.status.toLowerCase() : "completed")
-                    }
-                  >
-                    {o.status}
-                  </span>
-                </p>
-                <p>
-                  Payment:{" "}
-                  <span
-                    className={
-                      "status-badge payment-" + payment.toLowerCase()
-                    }
-                  >
-                    {payment}
-                  </span>
-                </p>
-                <small>
-                  Created:{" "}
-                  {o.createdAt?.toDate
-                    ? o.createdAt.toDate().toLocaleString()
-                    : "—"}
-                </small>
+        <div className="my-orders">
+          {completedOrders.map((o) => {
+            const payment = o.paymentStatus || "Pending";
+            return (
+              <div className="order-card" key={o.id}>
+                <div>
+                  <h3>{o.name}</h3>
+                  <p>Price: ₹{o.price}</p>
+                  <p>Employee: {o.userId}</p>
+                  <p>
+                    Status:{" "}
+                    <span
+                      className={
+                        "status-badge status-" +
+                        (o.status ? o.status.toLowerCase() : "completed")
+                      }
+                    >
+                      {o.status}
+                    </span>
+                  </p>
+                  <p>
+                    Payment:{" "}
+                    <span
+                      className={
+                        "status-badge payment-" + payment.toLowerCase()
+                      }
+                    >
+                      {payment}
+                    </span>
+                  </p>
+                  <small>
+                    Created:{" "}
+                    {o.createdAt?.toDate
+                      ? o.createdAt.toDate().toLocaleString()
+                      : "—"}
+                  </small>
+                </div>
               </div>
-            </div>
-          );
-        })
+            );
+          })}
+        </div>
       )}
     </div>
   );

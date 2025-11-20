@@ -10,7 +10,8 @@ import {
 import { AuthProvider, useAuth } from "./AuthContext";
 import EmployeePage from "./pages/EmployeePage";
 import VendorPage from "./pages/VendorPage";
-import VendorOrdersPage from "./pages/VendorOrdersPage"; // 👈 NEW
+import VendorOrdersPage from "./pages/VendorOrdersPage";
+import VendorMenuPage from "./pages/VendorMenuPage"; // 👈 NEW
 import AdminPage from "./pages/AdminPage";
 import LoginPage from "./pages/LoginPage";
 
@@ -48,7 +49,7 @@ function RoleLanding() {
     return (
       <div style={{ padding: 20 }}>
         No role configured for this user. Please add a document in
-        Firestore `users` collection with a `role` field.
+        Firestore <code>users</code> collection with a <code>role</code> field.
       </div>
     );
   }
@@ -88,12 +89,22 @@ export default function App() {
             }
           />
 
-          {/* Vendor orders page (your new screen) */}
+          {/* Vendor orders page */}
           <Route
             path="/vendor/orders"
             element={
               <ProtectedRoute allowedRoles={["vendor"]}>
                 <VendorOrdersPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Vendor menu management page */}
+          <Route
+            path="/vendor/menu"
+            element={
+              <ProtectedRoute allowedRoles={["vendor"]}>
+                <VendorMenuPage />
               </ProtectedRoute>
             }
           />
