@@ -227,15 +227,15 @@ export default function VendorPage() {
         </div>
       </div>
 
-      <h1>Vendor — AI Kitchen Console</h1>
+      <h1>Dashboard</h1>
       <p className="muted">
-        Use AI suggestions to prepare the right number of plates, and track live
+        Use suggestions below to prepare the right number of plates, and track live
         orders. Detailed menu editing is available in{" "}
         <strong>Manage Menu</strong>.
       </p>
 
       {/* 🔮 AI Prep Suggestions */}
-      <h2 style={{ marginTop: 24 }}>AI Prep Suggestions for Today</h2>
+      <h2 style={{ marginTop: 24 }}>Food Prep Suggestions for Today</h2>
       {prepSuggestions.length === 0 ? (
         <p className="muted">
           Not enough data yet. As orders come in over a few days, AI will start
