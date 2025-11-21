@@ -1,6 +1,12 @@
+// src/pages/AdminPage.js
 import React, { useEffect, useState } from "react";
 import db from "../firestore";
-import { collection, onSnapshot } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 import { useAuth } from "../AuthContext";
 import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
@@ -16,10 +22,6 @@ function daysAgoString(days) {
 }
 
 // 🔹 Time-of-day meal window for badge
-// 07:00–11:59 → Breakfast
-// 12:00–15:59 → Lunch
-// 16:00–18:59 → Snacks
-// 19:00–22:59 → Dinner
 function getCurrentMealWindowMeta() {
   const now = new Date();
   const hour = now.getHours();
@@ -236,8 +238,7 @@ function computeDemandHeatmap(orders) {
 }
 
 /**
- * Dynamic demand forecast for next lunch window:
- * average lunch orders from same weekday for last 3 occurrences.
+ * Dynamic demand forecast for next lunch window
  */
 function computeNextLunchForecast(orders) {
   if (!orders.length) {
@@ -284,9 +285,6 @@ function computeNextLunchForecast(orders) {
 
 /**
  * Simple queue simulation for X minutes.
- * newOrdersPerMin: avg new orders per minute
- * stations: parallel serving stations
- * avgPrepMinutes: average prep time per order
  */
 function runQueueSimulation({
   durationMinutes = 45,
@@ -337,6 +335,16 @@ export default function AdminPage() {
   const [simResult, setSimResult] = useState(null);
 
   const mealWindow = getCurrentMealWindowMeta();
+
+  // -------- Vendor registration form state --------
+  const [vendorForm, setVendorForm] = useState({
+    name: "",
+    email: "",
+    vendorId: "",
+    location: "",
+    contactName: "",
+  });
+  const [vendorMsg, setVendorMsg] = useState("");
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -445,6 +453,51 @@ export default function AdminPage() {
     setSimResult(res);
   };
 
+  // -------- Vendor registration handlers --------
+  const handleVendorChange = (field, value) => {
+    setVendorForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleCreateVendor = async (e) => {
+    e.preventDefault();
+    setVendorMsg("");
+
+    const { name, email, vendorId, location, contactName } = vendorForm;
+
+    if (!email || !vendorId || !name) {
+      setVendorMsg("Vendor name, email and Vendor ID are required.");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "users"), {
+        role: "vendor",
+        email: email.trim(),
+        name: name.trim(),
+        vendorId: vendorId.trim(),
+        employeeId: null,
+        location: location.trim() || null,
+        contactName: contactName.trim() || null,
+        uid: null, // will be filled when vendor registers via login page
+        createdAt: serverTimestamp(),
+        createdBy: user?.uid || null,
+      });
+      setVendorMsg(
+        `Vendor profile created for ${email}. Ask them to use the Login page → "New employee / vendor registration" with the same email.`
+      );
+      setVendorForm({
+        name: "",
+        email: "",
+        vendorId: "",
+        location: "",
+        contactName: "",
+      });
+    } catch (err) {
+      console.error("Create vendor profile error:", err);
+      setVendorMsg("Failed to create vendor profile. Check console.");
+    }
+  };
+
   return (
     <div className="app-shell">
       <div className="container">
@@ -460,13 +513,9 @@ export default function AdminPage() {
         </div>
 
         {/* Page header */}
-        <h1 className="page-title">Admin — AI Control Center</h1>
-        <p className="page-subtitle">
-          Not just a canteen app — this is your AI operating system for
-          workplace dining.
-        </p>
 
-        {/* 🔹 Current active meal window badge */}
+
+        {/* Current active meal window badge */}
         {mealWindow && (
           <div
             style={{
@@ -603,7 +652,7 @@ export default function AdminPage() {
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                <span className="metric-icon">🔥</span>
+                
                 <div className="card-title">AI Demand Heatmap</div>
               </div>
             </div>
@@ -655,7 +704,7 @@ export default function AdminPage() {
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                <span className="metric-icon">📈</span>
+                
                 <div className="card-title">Next Lunch Forecast</div>
               </div>
             </div>
@@ -693,7 +742,7 @@ export default function AdminPage() {
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                <span className="metric-icon">📹</span>
+                
                 <div className="card-title">Live Queue (Camera / AI)</div>
               </div>
             </div>
@@ -935,6 +984,124 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* ---------- New Vendor Registration (Admin) ---------- */}
+        <div className="section" style={{ marginTop: 32 }}>
+          <h2 className="section-title">New Vendor Registration</h2>
+          <p className="small mt-8">
+            Use this to onboard a new vendor partner. This creates a{" "}
+            <code>users</code> document with role <code>vendor</code>. Ask the
+            vendor to visit the portal, click{" "}
+            <strong>“New employee / vendor registration”</strong> on the login
+            page and register using the <strong>same email</strong>. Their
+            account will automatically link to this profile.
+          </p>
+
+          {vendorMsg && (
+            <div
+              style={{
+                marginTop: 12,
+                marginBottom: 8,
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #dbeafe",
+                background: "#eff6ff",
+                fontSize: 13,
+                color: "#1d4ed8",
+              }}
+            >
+              {vendorMsg}
+            </div>
+          )}
+
+          <div className="card" style={{ marginTop: 12, maxWidth: 640 }}>
+            <form
+              onSubmit={handleCreateVendor}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div className="small">
+                  Vendor name{" "}
+                  <span style={{ color: "#b91c1c" }}>*</span>
+                </div>
+                <input
+                  className="input"
+                  value={vendorForm.name}
+                  onChange={(e) =>
+                    handleVendorChange("name", e.target.value)
+                  }
+                  placeholder="Main Canteen"
+                />
+              </div>
+              <div>
+                <div className="small">
+                  Vendor admin email{" "}
+                  <span style={{ color: "#b91c1c" }}>*</span>
+                </div>
+                <input
+                  className="input"
+                  type="email"
+                  value={vendorForm.email}
+                  onChange={(e) =>
+                    handleVendorChange("email", e.target.value)
+                  }
+                  placeholder="vendor@canteen.com"
+                />
+              </div>
+              <div>
+                <div className="small">
+                  Vendor ID <span style={{ color: "#b91c1c" }}>*</span>
+                </div>
+                <input
+                  className="input"
+                  value={vendorForm.vendorId}
+                  onChange={(e) =>
+                    handleVendorChange("vendorId", e.target.value)
+                  }
+                  placeholder="VEND01"
+                />
+              </div>
+              <div>
+                <div className="small">
+                  Location / campus{" "}
+                  <span style={{ color: "#6b7280" }}>(optional)</span>
+                </div>
+                <input
+                  className="input"
+                  value={vendorForm.location}
+                  onChange={(e) =>
+                    handleVendorChange("location", e.target.value)
+                  }
+                  placeholder="Tower 3, Phase 1"
+                />
+              </div>
+              <div>
+                <div className="small">
+                  Contact person{" "}
+                  <span style={{ color: "#6b7280" }}>(optional)</span>
+                </div>
+                <input
+                  className="input"
+                  value={vendorForm.contactName}
+                  onChange={(e) =>
+                    handleVendorChange("contactName", e.target.value)
+                  }
+                  placeholder="Canteen Manager Name"
+                />
+              </div>
+
+              <div style={{ alignSelf: "flex-end" }}>
+                <button type="submit" className="btn" style={{ marginTop: 4 }}>
+                  Create Vendor Profile
+                </button>
+              </div>
+            </form>
           </div>
         </div>
 

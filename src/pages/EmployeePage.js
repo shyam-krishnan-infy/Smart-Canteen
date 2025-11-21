@@ -17,22 +17,22 @@ import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
 
 // ---- Time-of-day meal window helper ----
-// Adjust ranges if you want exact boundaries:
-// Here we use:
-// 07:00–11:59 → Breakfast
-// 12:00–15:59 → Lunch
-// 16:00–18:59 → Snacks
-// 19:00–22:59 → Dinner
+// As per requirement:
+// 07:00–10:59  → Breakfast
+// 12:00–14:59  → Lunch
+// 16:00–17:59  → Snacks
+// 19:00–21:59  → Dinner
+// Any other time => no active window (view only, no pre-book)
 function getCurrentMealWindow() {
   const now = new Date();
   const hour = now.getHours(); // 0–23
 
-  if (hour >= 7 && hour < 12) return "Breakfast";
-  if (hour >= 12 && hour < 16) return "Lunch";
-  if (hour >= 16 && hour < 19) return "Snacks";
-  if (hour >= 19 && hour < 23) return "Dinner";
+  if (hour >= 7 && hour < 11) return "Breakfast";
+  if (hour >= 12 && hour < 15) return "Lunch";
+  if (hour >= 16 && hour < 18) return "Snacks";
+  if (hour >= 19 && hour < 22) return "Dinner";
 
-  return null; // outside main windows, show everything
+  return null; // outside main windows
 }
 
 // Helper: interpret different representations of "available"
@@ -182,10 +182,29 @@ export default function EmployeePage() {
     return () => unsub();
   }, [userId]);
 
-  // pre-book an item
+  // pre-book an item (enforces meal window)
   const handlePrebook = async (item) => {
     if (!userId) {
       setNotif("No Employee ID linked to this account.");
+      return;
+    }
+
+    const nowWindow = getCurrentMealWindow();
+    const itemCategory = item.category || "Other";
+
+    // Outside any window → hard block
+    if (!nowWindow) {
+      setNotif(
+        "Pre-booking is only available during meal windows (Breakfast / Lunch / Snacks / Dinner)."
+      );
+      return;
+    }
+
+    // Only allow items that belong to current window
+    if (itemCategory !== nowWindow) {
+      setNotif(
+        `"${item.name}" can be pre-booked only during its window: ${itemCategory}. Current window: ${nowWindow}.`
+      );
       return;
     }
 
@@ -271,7 +290,7 @@ export default function EmployeePage() {
   // - Otherwise, use user's chosen filter.
   const effectiveFilter = mealWindow || categoryFilter;
 
-  // AI recommendations (restricted to effectiveFilter)
+  // AI recommendations (restricted to effectiveFilter & meal window rules)
   const recommendedItems = (() => {
     if (!menuItems.length) return [];
 
@@ -326,6 +345,14 @@ export default function EmployeePage() {
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  // Helper: is this item allowed to be pre-booked *right now*?
+  const isItemInActiveWindow = (item) => {
+    const win = getCurrentMealWindow();
+    const cat = item.category || "Other";
+    if (!win) return false; // outside any window, nothing allowed
+    return cat === win;
+  };
 
   return (
     <div className="employee-page container">
@@ -389,7 +416,7 @@ export default function EmployeePage() {
         >
           Current time: <strong>{currentTimeLabel}</strong>.{" "}
           <strong>{mealWindow}</strong> window is active now. Only{" "}
-          {mealWindow} items can be ordered. Other categories are disabled.
+          {mealWindow} items can be pre-booked. Other categories are disabled.
         </div>
       ) : (
         <div
@@ -403,7 +430,8 @@ export default function EmployeePage() {
           }}
         >
           Current time: <strong>{currentTimeLabel}</strong>. No specific meal
-          window is active; you can browse all categories.
+          window is active. You can browse all categories, but{" "}
+          <strong>pre-booking is disabled until the next meal window</strong>.
         </div>
       )}
 
@@ -443,6 +471,10 @@ export default function EmployeePage() {
           <div className="menu-list">
             {recommendedItems.map((item) => {
               const available = isItemAvailable(item);
+              const allowedNow = isItemInActiveWindow(item);
+              const disabled =
+                !userId || !available || !allowedNow;
+
               return (
                 <div key={item.id} className="menu-card">
                   <div className="menu-left">
@@ -467,11 +499,10 @@ export default function EmployeePage() {
                   <div className="menu-action">
                     <button
                       className="btn"
-                      disabled={!available || !userId}
+                      disabled={disabled}
                       style={{
-                        opacity: available && userId ? 1 : 0.4,
-                        cursor:
-                          available && userId ? "pointer" : "not-allowed",
+                        opacity: disabled ? 0.4 : 1,
+                        cursor: disabled ? "not-allowed" : "pointer",
                       }}
                       onClick={() => handlePrebook(item)}
                     >
@@ -543,6 +574,10 @@ export default function EmployeePage() {
           filteredMenuItems.map((item) => {
             const available = isItemAvailable(item);
             const cat = item.category || "Other";
+            const allowedNow = isItemInActiveWindow(item);
+            const disabled =
+              !userId || !available || !allowedNow;
+
             return (
               <div key={item.id} className="menu-card">
                 <div className="menu-left">
@@ -566,15 +601,25 @@ export default function EmployeePage() {
                       {available ? "Yes" : "No"}
                     </strong>
                   </p>
+                  {!mealWindow && (
+                    <p
+                      style={{
+                        fontSize: 11,
+                        color: "#999",
+                        marginTop: 4,
+                      }}
+                    >
+                      Viewing only (outside meal hours).
+                    </p>
+                  )}
                 </div>
                 <div className="menu-action">
                   <button
                     className="btn"
-                    disabled={!available || !userId}
+                    disabled={disabled}
                     style={{
-                      opacity: available && userId ? 1 : 0.4,
-                      cursor:
-                        available && userId ? "pointer" : "not-allowed",
+                      opacity: disabled ? 0.4 : 1,
+                      cursor: disabled ? "not-allowed" : "pointer",
                     }}
                     onClick={() => handlePrebook(item)}
                   >
