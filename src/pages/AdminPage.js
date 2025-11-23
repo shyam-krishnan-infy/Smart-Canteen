@@ -61,12 +61,14 @@ function computeAiInsights(orders) {
 
   recent.forEach((o) => {
     const status = (o.status || "").toLowerCase();
+
     if (status === "ready" || status === "completed") {
       if (o.createdAt?.toDate && o.updatedAt?.toDate) {
         const created = o.createdAt.toDate();
         const updated = o.updatedAt.toDate();
         const diffMs = updated.getTime() - created.getTime();
         const diffMin = diffMs / 60000;
+
         if (diffMin > 0 && diffMin < 180) {
           completedLike.push(diffMin);
         }
@@ -191,13 +193,13 @@ function computeSlaStats(orders) {
 }
 
 /**
- * Heatmap: last 7 days × 3 time slots
- * Breakfast: 7–10, Lunch: 12–15, Snacks: 16–18 (by createdAt hour)
+ * Heatmap: last 7 days × time slots
  */
 const TIME_SLOTS = [
   { id: "breakfast", label: "Breakfast", from: 7, to: 10 },
   { id: "lunch", label: "Lunch", from: 12, to: 15 },
   { id: "snacks", label: "Snacks", from: 16, to: 18 },
+  { id: "dinner", label: "Dinner", from: 19, to: 23 }, // added dinner
 ];
 
 function getHour(o) {
@@ -219,17 +221,18 @@ function computeDemandHeatmap(orders) {
     const dateKey = d.toISOString().split("T")[0];
 
     const row = { date: dateKey, slots: {} };
-    TIME_SLOTS.forEach((slot) => {
-      const count = orders.filter((o) => {
-        if (o.date !== dateKey) return false;
-        const h = getHour(o);
-        if (h == null) return false;
-        return h >= slot.from && h < slot.to;
-      }).length;
 
+    for (const slot of TIME_SLOTS) {
+      let count = 0;
+      for (const o of orders) {
+        if (o.date !== dateKey) continue;
+        const h = getHour(o);
+        if (h == null) continue;
+        if (h >= slot.from && h < slot.to) count += 1;
+      }
       row.slots[slot.id] = count;
       if (count > maxCount) maxCount = count;
-    });
+    }
 
     rows.push(row);
   }
@@ -237,9 +240,6 @@ function computeDemandHeatmap(orders) {
   return { rows, max: maxCount || 1 };
 }
 
-/**
- * Dynamic demand forecast for next lunch window
- */
 function computeNextLunchForecast(orders) {
   if (!orders.length) {
     return { forecast: 0, lower: 0, upper: 0 };
@@ -283,9 +283,6 @@ function computeNextLunchForecast(orders) {
   return { forecast, lower, upper };
 }
 
-/**
- * Simple queue simulation for X minutes.
- */
 function runQueueSimulation({
   durationMinutes = 45,
   newOrdersPerMin = 5,
@@ -324,6 +321,7 @@ function runQueueSimulation({
 export default function AdminPage() {
   const { user } = useAuth();
   const [orders, setOrders] = useState([]);
+  const [usersList, setUsersList] = useState([]);
   const [statusFilter, setStatusFilter] = useState("All");
 
   const [simParams, setSimParams] = useState({
@@ -336,7 +334,6 @@ export default function AdminPage() {
 
   const mealWindow = getCurrentMealWindowMeta();
 
-  // -------- Vendor registration form state --------
   const [vendorForm, setVendorForm] = useState({
     name: "",
     email: "",
@@ -355,6 +352,20 @@ export default function AdminPage() {
       },
       (err) => {
         console.error("AdminPage orders snapshot error:", err);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "users"),
+      (snap) => {
+        const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setUsersList(arr);
+      },
+      (err) => {
+        console.error("AdminPage users snapshot error:", err);
       }
     );
     return () => unsub();
@@ -441,49 +452,52 @@ export default function AdminPage() {
       !["Completed", "Cancelled"].includes(o.status)
   ).length;
 
-  const handleSimChange = (field, value) => {
-    setSimParams((prev) => ({
-      ...prev,
-      [field]: Number(value) || 0,
-    }));
-  };
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - 7);
 
-  const handleRunSimulation = () => {
-    const res = runQueueSimulation(simParams);
-    setSimResult(res);
-  };
+  const recentOrders = orders.filter((o) => {
+    if (!o.createdAt?.toDate) return false;
+    return o.createdAt.toDate() >= cutoffDate;
+  });
 
-  // -------- Vendor registration handlers --------
-  const handleVendorChange = (field, value) => {
-    setVendorForm((prev) => ({ ...prev, [field]: value }));
-  };
+  const activeUserIds = new Set();
+  recentOrders.forEach((o) => {
+    if (o.userId) activeUserIds.add(o.userId);
+    else if (o.uid) activeUserIds.add(o.uid);
+    else if (o.userEmail) activeUserIds.add(o.userEmail);
+  });
+  const activeUsersCount = activeUserIds.size;
+
+  const newSignupsCount = usersList.filter((u) => {
+    if (!u.createdAt?.toDate) return false;
+    return u.createdAt.toDate() >= cutoffDate;
+  }).length;
+
+  const prebookedCount = recentOrders.filter(
+    (o) => (o.status === "Prebooked") || (o.prebooked === true)
+  ).length;
+  const totalRecentOrders = recentOrders.length || 0;
+  const prebookPct = totalRecentOrders === 0 ? 0 : Math.round((prebookedCount / totalRecentOrders) * 100);
+  const estRushReductionPct = Math.round((prebookPct * 0.3) || 0);
+
+  const handleVendorChange = (k, v) =>
+    setVendorForm((p) => ({ ...p, [k]: v }));
 
   const handleCreateVendor = async (e) => {
     e.preventDefault();
     setVendorMsg("");
-
-    const { name, email, vendorId, location, contactName } = vendorForm;
-
-    if (!email || !vendorId || !name) {
-      setVendorMsg("Vendor name, email and Vendor ID are required.");
-      return;
-    }
-
     try {
       await addDoc(collection(db, "users"), {
+        name: vendorForm.name,
+        email: vendorForm.email,
         role: "vendor",
-        email: email.trim(),
-        name: name.trim(),
-        vendorId: vendorId.trim(),
-        employeeId: null,
-        location: location.trim() || null,
-        contactName: contactName.trim() || null,
-        uid: null, // will be filled when vendor registers via login page
+        vendorId: vendorForm.vendorId,
+        location: vendorForm.location || null,
+        contactName: vendorForm.contactName || null,
         createdAt: serverTimestamp(),
-        createdBy: user?.uid || null,
       });
       setVendorMsg(
-        `Vendor profile created for ${email}. Ask them to use the Login page → "New employee / vendor registration" with the same email.`
+        `Vendor profile created. Ask them to register using the same email via Login -> New employee / vendor registration.`
       );
       setVendorForm({
         name: "",
@@ -498,10 +512,44 @@ export default function AdminPage() {
     }
   };
 
+  const handleSimChange = (k, v) => {
+    setSimParams((p) => ({ ...p, [k]: Number(v) }));
+  };
+
+  const handleRunSimulation = () => {
+    const res = runQueueSimulation(simParams);
+    setSimResult(res);
+  };
+
+  // Inline styles used specifically for this page
+  const adminPageInlineStyles = `
+    .admin-card-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; align-items: stretch; width: 100%; margin-top: 12px; }
+    .admin-card-grid .card { display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 120px; box-sizing: border-box; }
+    .card .card-header-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .card p.small { margin-top:8px; color:#374151; }
+
+    /* Heatmap specific styles */
+    .heatmap-wrapper { width:100%; overflow:auto; padding-top: 8px; }
+    .heatmap-grid { display:grid; gap:12px; align-items:center; }
+    .heatmap-header { font-weight:700; color:#374151; text-align:center; }
+    .heatmap-label { color:#374151; padding:8px 6px; text-align:left; }
+    .heatmap-cell {
+      display:flex; align-items:center; justify-content:center;
+      height:44px; min-width:64px; border-radius:12px; font-weight:700;
+      background: rgba(59,130,246,0.12); color:#0f172a;
+    }
+
+    @media (max-width:880px) {
+      .admin-card-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+      .heatmap-cell { height:40px; min-width:56px; font-size:14px; }
+    }
+  `;
+
   return (
     <div className="app-shell">
       <div className="container">
-        {/* Auth bar */}
+        <style>{adminPageInlineStyles}</style>
+
         <div className="top-bar">
           <div>
             Logged in as{" "}
@@ -512,46 +560,23 @@ export default function AdminPage() {
           </button>
         </div>
 
-        {/* Page header */}
+        <div style={{ marginTop: 12 }}>
+          <h1 style={{ margin: 0 }}>Admin dashboard</h1>
+          <div style={{ color: "#6b7280", marginTop: 6 }}>Overview of orders, vendors, and KPIs</div>
+        </div>
 
-
-        {/* Current active meal window badge */}
         {mealWindow && (
-          <div
-            style={{
-              marginTop: 8,
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <span
-              style={{
-                padding: "4px 10px",
-                borderRadius: 999,
-                border: "1px solid #d1fae5",
-                background: "#ecfdf5",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "#047857",
-              }}
-            >
+          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ padding: "4px 10px", borderRadius: 999, border: "1px solid #d1fae5", background: "#ecfdf5", fontSize: 12, fontWeight: 600, color: "#047857" }}>
               Current active window: {mealWindow.label}
             </span>
-            <span
-              style={{
-                fontSize: 12,
-                color: "#6b7280",
-              }}
-            >
+            <span style={{ fontSize: 12, color: "#6b7280" }}>
               Time range: {mealWindow.range}
             </span>
           </div>
         )}
 
-        {/* Summary + AI cards */}
-        <div className="card-grid">
+        <div className="card-grid admin-card-grid" style={{ marginTop: 12 }}>
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
@@ -560,22 +585,18 @@ export default function AdminPage() {
               </div>
               <div className="card-value">{totalOrders}</div>
             </div>
-            <p className="small mt-8">
-              All historical orders currently stored in Firestore.
-            </p>
+            <p className="small mt-8">All historical orders currently stored in Firestore.</p>
           </div>
 
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
                 <span className="metric-icon">📅</span>
-                <div className="card-title">Today&apos;s Orders</div>
+                <div className="card-title">Today's Orders</div>
               </div>
               <div className="card-value">{todayOrders.length}</div>
             </div>
-            <p className="small mt-8">
-              Date filter: <strong>{today}</strong>.
-            </p>
+            <p className="small mt-8">Date filter: <strong>{today}</strong>.</p>
           </div>
 
           <div className="card">
@@ -586,208 +607,150 @@ export default function AdminPage() {
               </div>
               <div className="card-value">{Object.keys(itemCounts).length}</div>
             </div>
-            <p className="small mt-8">
-              Unique dish names ordered at least once.
-            </p>
+            <p className="small mt-8">Unique dish names ordered at least once.</p>
           </div>
 
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                <span className="metric-icon">💰</span>
-                <div className="card-title">Total Revenue (Paid)</div>
+                <span className="metric-icon">🧾</span>
+                <div className="card-title">Order Status Totals</div>
               </div>
-              <div className="card-value">₹{totalRevenue}</div>
+              <div className="card-value">{Object.values(statusCounts).reduce((s,v)=>s+v,0)}</div>
             </div>
-            <p className="small mt-8">
-              Today: <strong>₹{todayRevenue}</strong>
-            </p>
+            <p className="small mt-8">{Object.entries(statusCounts).length === 0 ? "No orders yet." : Object.entries(statusCounts).map(([k,v]) => `${k}: ${v}`).join(" • ")}</p>
           </div>
 
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                <span className="metric-icon">⏱️</span>
-                <div className="card-title">Service Quality (7 days)</div>
+                <span className="metric-icon">💳</span>
+                <div className="card-title">Payments</div>
               </div>
-              <div className="card-value">
-                {sla.slaOnTimePercent}
-                <span style={{ fontSize: 16 }}>%</span>
-              </div>
+              <div className="card-value">{Object.values(paymentCounts).reduce((s,v)=>s+v,0)}</div>
             </div>
-            <p className="small mt-8">
-              Avg prep: {sla.avgPrepMinutes.toFixed(1)} min over{" "}
-              {sla.totalCompleted} completed orders (SLA 15 min).
-            </p>
+            <p className="small mt-8">{Object.entries(paymentCounts).length === 0 ? "No payments yet." : Object.entries(paymentCounts).map(([k,v]) => `${k}: ${v}`).join(" • ")}</p>
           </div>
+        </div>
 
+        <div className="card-grid admin-card-grid" style={{ marginTop: 18 }}>
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
                 <span className="metric-icon">🤖</span>
-                <div className="card-title">AI Efficiency (7 days)</div>
+                <div className="card-title">AI Insights (7 days)</div>
               </div>
-              <div className="card-value">{ai.timeSavedMinutes} min</div>
+              <div className="card-value">{ai.consideredOrders}</div>
             </div>
-            <p className="small mt-8">
-              Estimated kitchen &amp; queue time saved vs a 12 min/order
-              baseline.
-            </p>
-            <p className="small mt-8">
-              <strong>{ai.wasteAvoidedKg} kg</strong> food waste avoided via{" "}
-              {ai.cancelledCount} early cancellations.
-              {ai.avgPrepTimeMinutes > 0 && (
-                <>
-                  {" "}
-                  Avg prep time: {ai.avgPrepTimeMinutes.toFixed(1)} min
-                </>
-              )}
-            </p>
+            <p className="small mt-8">Avg prep time: {ai.avgPrepTimeMinutes ? ai.avgPrepTimeMinutes.toFixed(1) : 0} min</p>
+          </div>
+
+          <div className="card">
+            <div className="card-header-row">
+              <div className="card-header-main">
+                <span className="metric-icon">👥</span>
+                <div className="card-title">Active Users (7 days)</div>
+              </div>
+              <div className="card-value">{activeUsersCount}</div>
+            </div>
+            <p className="small mt-8">Unique users who placed orders in the last 7 days.</p>
+            <p className="small mt-8"><strong>{newSignupsCount}</strong> new signups (last 7 days).</p>
+          </div>
+
+          <div className="card">
+            <div className="card-header-row">
+              <div className="card-header-main">
+                <span className="metric-icon">📆</span>
+                <div className="card-title">Pre-booking % (7 days)</div>
+              </div>
+              <div className="card-value">{prebookPct}<span style={{ fontSize: 16 }}>%</span></div>
+            </div>
+            <p className="small mt-8">Of orders in the last 7 days that were pre-booked vs live orders.</p>
+            <p className="small mt-8">Estimated kitchen rush reduced by <strong>{estRushReductionPct}%</strong>.</p>
           </div>
         </div>
 
-        {/* AI Heatmap + Dynamic lunch forecast + Live queue */}
-        <div className="card-grid" style={{ marginTop: 24 }}>
-          {/* Heatmap */}
+        {/* HEATMAP SECTION */}
+        <div className="card-grid admin-card-grid" style={{ marginTop: 24 }}>
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                
                 <div className="card-title">AI Demand Heatmap</div>
               </div>
             </div>
-            <p className="small mt-8">
-              Last 7 days — darker cells mean heavier demand in that time slot.
-            </p>
+            <p className="small mt-8">Last 7 days — darker cells mean heavier demand in that time slot.</p>
 
-            {heatRows.length === 0 ? (
-              <div className="info-banner muted mt-12">
-                Not enough data yet.
-              </div>
-            ) : (
-              <div className="heatmap-grid mt-12">
-                <div className="heatmap-header" />
-                {TIME_SLOTS.map((s) => (
-                  <div key={s.id} className="heatmap-header">
-                    {s.label}
-                  </div>
-                ))}
+            <div className="heatmap-wrapper">
+              {heatRows.length === 0 ? (
+                <div className="info-banner muted mt-12">Not enough data yet.</div>
+              ) : (
+                (() => {
+                  // compute template columns: first column for date labels, then one for each time slot
+                  const cols = `140px repeat(${TIME_SLOTS.length}, 1fr)`;
+                  return (
+                    <div className="heatmap-grid" style={{ gridTemplateColumns: cols }}>
+                      {/* top-left empty placeholder */}
+                      <div style={{}} />
+                      {/* slot headers */}
+                      {TIME_SLOTS.map((s) => (
+                        <div key={s.id} className="heatmap-header">{s.label}</div>
+                      ))}
 
-                {heatRows.map((row) => (
-                  <React.Fragment key={row.date}>
-                    <div className="heatmap-label">{row.date}</div>
-                    {TIME_SLOTS.map((slot) => {
-                      const val = row.slots[slot.id] || 0;
-                      const intensity = val === 0 ? 0 : val / heatMax;
-                      const bg = `rgba(59,130,246,${
-                        0.15 + intensity * 0.65
-                      })`;
-                      const color =
-                        intensity > 0.5 ? "#f9fafb" : "#111827";
-                      return (
-                        <div
-                          key={slot.id}
-                          className="heatmap-cell"
-                          style={{ background: bg, color }}
-                        >
-                          {val}
-                        </div>
-                      );
-                    })}
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
+                      {/* rows */}
+                      {heatRows.map((row) => (
+                        <React.Fragment key={row.date}>
+                          <div className="heatmap-label">{row.date}</div>
+                          {TIME_SLOTS.map((slot) => {
+                            const val = row.slots[slot.id] || 0;
+                            const intensity = val === 0 ? 0 : val / heatMax;
+                            const alpha = 0.12 + intensity * 0.65;
+                            const bg = `rgba(59,130,246,${alpha})`;
+                            const color = intensity > 0.5 ? "#ffffff" : "#0f172a";
+                            return (
+                              <div key={slot.id} className="heatmap-cell" style={{ background: bg, color }}>
+                                {val}
+                              </div>
+                            );
+                          })}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
           </div>
 
-          {/* Dynamic forecast */}
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                
                 <div className="card-title">Next Lunch Forecast</div>
               </div>
             </div>
             {lunchForecast.forecast === 0 ? (
-              <p className="small mt-8">
-                Not enough historic data yet for this weekday.
-              </p>
+              <p className="small mt-8">Not enough historic data yet for this weekday.</p>
             ) : (
               <>
-                <div
-                  style={{
-                    fontSize: 28,
-                    fontWeight: 700,
-                    marginTop: 10,
-                  }}
-                >
-                  {lunchForecast.forecast} plates
-                </div>
-                <p className="small mt-8">
-                  Expected lunch demand for today, based on the last 3 same
-                  weekdays.
-                </p>
-                <p className="small mt-8">
-                  Range:{" "}
-                  <strong>
-                    {lunchForecast.lower} – {lunchForecast.upper}
-                  </strong>{" "}
-                  plates.
-                </p>
+                <div style={{ fontSize: 28, fontWeight: 700, marginTop: 10 }}>{lunchForecast.forecast} plates</div>
+                <p className="small mt-8">Expected lunch demand for today, based on the last 3 same weekdays.</p>
+                <p className="small mt-8">Range: <strong>{lunchForecast.lower} – {lunchForecast.upper}</strong> plates.</p>
               </>
             )}
           </div>
 
-          {/* Live queue camera card (simulated) */}
           <div className="card">
             <div className="card-header-row">
               <div className="card-header-main">
-                
                 <div className="card-title">Live Queue (Camera / AI)</div>
               </div>
             </div>
-            <p className="small mt-8">
-              Prototype: using active orders as a proxy for live queue length.
-              In production, this is fed by a vision model.
-            </p>
-            <div
-              style={{
-                marginTop: 14,
-                padding: "10px 12px",
-                borderRadius: 14,
-                background:
-                  "radial-gradient(circle at top, #dbeafe, #eff6ff)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
+            <p className="small mt-8">Prototype: using active orders as a proxy for live queue length.</p>
+            <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 14, background: "radial-gradient(circle at top, #dbeafe, #eff6ff)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#1e3a8a",
-                  }}
-                >
-                  Estimated Queue Length
-                </div>
-                <div style={{ fontSize: 26, fontWeight: 700 }}>
-                  {liveQueueLength} people
-                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1e3a8a" }}>Estimated Queue Length</div>
+                <div style={{ fontSize: 26, fontWeight: 700 }}>{liveQueueLength} people</div>
               </div>
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: "999px",
-                  border: "3px solid rgba(37,99,235,0.35)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22,
-                }}
-              >
+              <div style={{ width: 48, height: 48, borderRadius: "999px", border: "3px solid rgba(37,99,235,0.35)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
                 👥
               </div>
             </div>

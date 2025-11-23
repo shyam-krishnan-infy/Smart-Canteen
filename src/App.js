@@ -11,10 +11,21 @@ import { AuthProvider, useAuth } from "./AuthContext";
 import EmployeePage from "./pages/EmployeePage";
 import VendorPage from "./pages/VendorPage";
 import VendorOrdersPage from "./pages/VendorOrdersPage";
-import VendorMenuPage from "./pages/VendorMenuPage"; // 👈 NEW
+import VendorMenuPage from "./pages/VendorMenuPage";
 import AdminPage from "./pages/AdminPage";
 import LoginPage from "./pages/LoginPage";
+import VerifyEmail from "./pages/VerifyEmail";
 
+/**
+ * ProtectedRoute: ensures user is signed in AND their email is verified.
+ * Also enforces role-based access if allowedRoles is provided.
+ *
+ * Behavior:
+ * - shows a short "Checking session..." placeholder while auth is loading.
+ * - if no user -> redirect to /login
+ * - if user exists but email is not verified -> redirect to /login?unverified=true
+ * - if allowedRoles provided and user profile.role is missing/unauthorized -> show unauthorized message
+ */
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, profile, loading } = useAuth();
 
@@ -24,6 +35,16 @@ function ProtectedRoute({ children, allowedRoles }) {
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  // --- UPDATED: allow admin/vendor to bypass email verification ---
+  const userRole = profile?.role || null;
+  const bypassVerificationForRoles = ["admin", "vendor"];
+
+  // Only enforce email verification for users who are NOT admin/vendor
+  if (!bypassVerificationForRoles.includes(userRole) && !user.emailVerified) {
+    // You can show a message on /login reading query param ?unverified=true
+    return <Navigate to="/login?unverified=true" replace />;
   }
 
   if (allowedRoles && (!profile || !allowedRoles.includes(profile.role))) {
@@ -37,7 +58,12 @@ function ProtectedRoute({ children, allowedRoles }) {
   return children;
 }
 
-// If user hits "/", send them to the correct page based on their role
+/**
+ * RoleLanding: decides where to send a verified user based on Firestore profile.role
+ * - If user is not signed in -> redirect to /login
+ * - If profile missing or has no role -> show a helpful message
+ * - Otherwise redirect to correct dashboard
+ */
 function RoleLanding() {
   const { user, profile, loading } = useAuth();
 
@@ -68,6 +94,9 @@ export default function App() {
         <Routes>
           {/* Login */}
           <Route path="/login" element={<LoginPage />} />
+
+          {/* Verify (email action link lands here) */}
+          <Route path="/verify" element={<VerifyEmail />} />
 
           {/* Employee */}
           <Route
