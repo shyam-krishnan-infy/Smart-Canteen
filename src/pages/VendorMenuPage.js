@@ -541,7 +541,7 @@ export default function VendorMenuPage() {
                   <div className="menu-main">
                     <h2>{item.name}</h2>
                     <p>Price: ₹{item.price}</p>
-                    <p style={{ fontSize: 12, color: "#6b7280" }}>
+                    <p style={{ fontSize: 15, color: "#6b7280" }}>
                       {item.category || "Uncategorised"}
                     </p>
                     <p>

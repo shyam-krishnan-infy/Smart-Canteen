@@ -18,21 +18,31 @@ import { signOut } from "firebase/auth";
 
 // ---- Time-of-day meal window helper ----
 // As per requirement:
-// 07:00–10:59  → Breakfast
-// 12:00–14:59  → Lunch
-// 16:00–17:59  → Snacks
-// 19:00–21:59  → Dinner
+// 07:00–11:59  → Breakfast  (hours 7..11 inclusive)
+// 12:00–15:59  → Lunch      (hours 12..15)
+// 16:00–18:59  → Snacks     (hours 16..18)
+// 19:00–23:00  → Dinner     (hours 19..23)
 // Any other time => no active window (view only, no pre-book)
 function getCurrentMealWindow() {
   const now = new Date();
   const hour = now.getHours(); // 0–23
 
-  if (hour >= 7 && hour < 11) return "Breakfast";
-  if (hour >= 12 && hour < 15) return "Lunch";
-  if (hour >= 16 && hour < 18) return "Snacks";
-  if (hour >= 19 && hour < 22) return "Dinner";
+  if (hour >= 7 && hour <= 11) return "Breakfast";
+  if (hour >= 12 && hour <= 15) return "Lunch";
+  if (hour >= 16 && hour <= 18) return "Snacks";
+  if (hour >= 19 && hour <= 23) return "Dinner";
 
   return null; // outside main windows
+}
+
+// next meal window mapping (for allowed pre-book target)
+function getNextMealWindow(window) {
+  if (!window) return null;
+  if (window === "Breakfast") return "Lunch";
+  if (window === "Lunch") return "Snacks";
+  if (window === "Snacks") return "Dinner";
+  if (window === "Dinner") return "Breakfast"; // next-day breakfast
+  return null;
 }
 
 // Helper: interpret different representations of "available"
@@ -90,18 +100,12 @@ export default function EmployeePage() {
   const prevStatuses = useRef({});
 
   // Category tabs + time-of-day window
-  const CATEGORY_TABS = [
-    "All",
-    "Breakfast",
-    "Lunch",
-    "Snacks",
-    "Dinner",
-    "Other",
-  ];
+  const CATEGORY_TABS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
   const mealWindow = getCurrentMealWindow(); // e.g. "Breakfast" or null
+  const nextMealWindow = getNextMealWindow(mealWindow);
 
   const [categoryFilter, setCategoryFilter] = useState(
-    mealWindow || "All"
+    mealWindow || "Breakfast"
   );
 
   // Keep userId in sync
@@ -182,7 +186,59 @@ export default function EmployeePage() {
     return () => unsub();
   }, [userId]);
 
-  // pre-book an item (enforces meal window)
+  // book an item for immediate preparation (enforces meal window)
+  const handleBook = async (item) => {
+    if (!userId) {
+      setNotif("No Employee ID linked to this account.");
+      return;
+    }
+
+    const nowWindow = getCurrentMealWindow();
+    const itemCategory = item.category || "Other";
+
+    // Must be in a meal window to book
+    if (!nowWindow) {
+      setNotif("Booking is only available during meal windows.");
+      return;
+    }
+
+    // Only allow booking items that belong to current window
+    if (itemCategory !== nowWindow) {
+      setNotif(
+        `"${item.name}" can be booked only during its window: ${itemCategory}. Current window: ${nowWindow}.`
+      );
+      return;
+    }
+
+    const available = isItemAvailable(item);
+    if (!available) {
+      setNotif(`❌ "${item.name}" is not available right now.`);
+      return;
+    }
+
+    const todayDateString = new Date().toISOString().split("T")[0];
+
+    try {
+      await addDoc(collection(db, "orders"), {
+        itemId: item.id || null,
+        name: item.name || "item",
+        price: item.price || 0,
+        userId,
+        status: "Preparing", // immediate booking goes to Preparing
+        paymentStatus: "Pending",
+        date: todayDateString,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      setNotif(`Booked "${item.name}" successfully. Track it below.`);
+    } catch (err) {
+      console.error("Book error", err);
+      setNotif("Failed to book. Check console.");
+    }
+  };
+
+  // pre-book an item (enforces next-meal window)
   const handlePrebook = async (item) => {
     if (!userId) {
       setNotif("No Employee ID linked to this account.");
@@ -191,6 +247,7 @@ export default function EmployeePage() {
 
     const nowWindow = getCurrentMealWindow();
     const itemCategory = item.category || "Other";
+    const intendedPrebookWindow = getNextMealWindow(nowWindow);
 
     // Outside any window → hard block
     if (!nowWindow) {
@@ -200,10 +257,10 @@ export default function EmployeePage() {
       return;
     }
 
-    // Only allow items that belong to current window
-    if (itemCategory !== nowWindow) {
+    // Only allow items that belong to next window (not the current)
+    if (itemCategory !== intendedPrebookWindow) {
       setNotif(
-        `"${item.name}" can be pre-booked only during its window: ${itemCategory}. Current window: ${nowWindow}.`
+        `"${item.name}" can be pre-booked only for its window: ${itemCategory}. Current window: ${nowWindow}. You can pre-book ${intendedPrebookWindow} items now.`
       );
       return;
     }
@@ -285,10 +342,37 @@ export default function EmployeePage() {
     }
   };
 
-  // Decide effective category filter:
-  // - If within a meal window, we lock to that (Breakfast/Lunch/Snacks/Dinner).
-  // - Otherwise, use user's chosen filter.
-  const effectiveFilter = mealWindow || categoryFilter;
+  /* === FIXED: decide effective category filter ===
+     When a meal window is active, allow selecting either current or next meal.
+     When no meal window, default to the categoryFilter (or Breakfast if missing).
+  */
+  let effectiveFilter;
+  if (mealWindow) {
+    const allowed = [mealWindow];
+    if (nextMealWindow) allowed.push(nextMealWindow);
+    effectiveFilter = allowed.includes(categoryFilter)
+      ? categoryFilter
+      : mealWindow;
+  } else {
+    effectiveFilter = categoryFilter || "Breakfast";
+  }
+
+  // Helper: is this item allowed to be booked now?
+  const isBookable = (item) => {
+    const win = getCurrentMealWindow();
+    const cat = item.category || "Other";
+    if (!win) return false;
+    return cat === win;
+  };
+
+  // Helper: is this item allowed to be pre-booked now (i.e., it's the next meal window)
+  const isPrebookable = (item) => {
+    const win = getCurrentMealWindow();
+    const nextWin = getNextMealWindow(win);
+    const cat = item.category || "Other";
+    if (!win || !nextWin) return false;
+    return cat === nextWin;
+  };
 
   // AI recommendations (restricted to effectiveFilter & meal window rules)
   const recommendedItems = (() => {
@@ -296,12 +380,11 @@ export default function EmployeePage() {
 
     let availableMenu = menuItems.filter((item) => isItemAvailable(item));
 
-    if (effectiveFilter !== "All") {
-      availableMenu = availableMenu.filter((item) => {
-        const cat = item.category || "Other";
-        return cat === effectiveFilter;
-      });
-    }
+    // Filter to the currently selected category (no "All" option anymore)
+    availableMenu = availableMenu.filter((item) => {
+      const cat = item.category || "Other";
+      return cat === effectiveFilter;
+    });
 
     if (!availableMenu.length) return [];
 
@@ -335,7 +418,6 @@ export default function EmployeePage() {
 
   // Filter menu items for display
   const filteredMenuItems = menuItems.filter((item) => {
-    if (effectiveFilter === "All") return true;
     const cat = item.category || "Other";
     return cat === effectiveFilter;
   });
@@ -345,14 +427,6 @@ export default function EmployeePage() {
     hour: "2-digit",
     minute: "2-digit",
   });
-
-  // Helper: is this item allowed to be pre-booked *right now*?
-  const isItemInActiveWindow = (item) => {
-    const win = getCurrentMealWindow();
-    const cat = item.category || "Other";
-    if (!win) return false; // outside any window, nothing allowed
-    return cat === win;
-  };
 
   return (
     <div className="employee-page container">
@@ -415,8 +489,9 @@ export default function EmployeePage() {
           }}
         >
           Current time: <strong>{currentTimeLabel}</strong>.{" "}
-          <strong>{mealWindow}</strong> window is active now. Only{" "}
-          {mealWindow} items can be pre-booked. Other categories are disabled.
+          <strong>{mealWindow}</strong> window is active now. You may{" "}
+          <strong>book {mealWindow}</strong> items right away, and you may{" "}
+          <strong>pre-book {nextMealWindow}</strong> items for the upcoming window. Other categories are disabled.
         </div>
       ) : (
         <div
@@ -430,8 +505,8 @@ export default function EmployeePage() {
           }}
         >
           Current time: <strong>{currentTimeLabel}</strong>. No specific meal
-          window is active. You can browse all categories, but{" "}
-          <strong>pre-booking is disabled until the next meal window</strong>.
+          window is active. You can browse categories, but{" "}
+          <strong>booking and pre-booking are disabled until the next meal window</strong>.
         </div>
       )}
 
@@ -471,9 +546,19 @@ export default function EmployeePage() {
           <div className="menu-list">
             {recommendedItems.map((item) => {
               const available = isItemAvailable(item);
-              const allowedNow = isItemInActiveWindow(item);
-              const disabled =
-                !userId || !available || !allowedNow;
+              const canBook = isBookable(item);
+              const canPre = isPrebookable(item);
+              const disabled = !userId || !available || !(canBook || canPre);
+
+              let label = "Pre-book";
+              let onClick = () => handlePrebook(item);
+              if (canBook) {
+                label = "Book";
+                onClick = () => handleBook(item);
+              } else if (canPre) {
+                label = "Pre-book";
+                onClick = () => handlePrebook(item);
+              }
 
               return (
                 <div key={item.id} className="menu-card">
@@ -504,9 +589,9 @@ export default function EmployeePage() {
                         opacity: disabled ? 0.4 : 1,
                         cursor: disabled ? "not-allowed" : "pointer",
                       }}
-                      onClick={() => handlePrebook(item)}
+                      onClick={onClick}
                     >
-                      Pre-book
+                      {label}
                     </button>
                   </div>
                 </div>
@@ -530,13 +615,19 @@ export default function EmployeePage() {
           const isActive = effectiveFilter === cat;
           const catIsMeal =
             ["Breakfast", "Lunch", "Snacks", "Dinner"].includes(cat);
-          const disabled =
-            mealWindow && catIsMeal && cat !== mealWindow
-              ? true
-              : false;
-          const isAllDisabled = mealWindow && cat === "All";
 
-          const actuallyDisabled = disabled || isAllDisabled;
+          /* === CHANGED: allow both current mealWindow AND nextMealWindow ===
+             When a meal window is active, enable only:
+               - the current meal window (book)
+               - the next meal window (pre-book)
+             All others remain disabled during an active window.
+          */
+          const disabled =
+            mealWindow && catIsMeal
+              ? !(cat === mealWindow || cat === nextMealWindow)
+              : false;
+
+          const actuallyDisabled = disabled;
 
           return (
             <button
@@ -574,9 +665,19 @@ export default function EmployeePage() {
           filteredMenuItems.map((item) => {
             const available = isItemAvailable(item);
             const cat = item.category || "Other";
-            const allowedNow = isItemInActiveWindow(item);
-            const disabled =
-              !userId || !available || !allowedNow;
+            const canBook = isBookable(item);
+            const canPre = isPrebookable(item);
+            const disabled = !userId || !available || !(canBook || canPre);
+
+            let label = "Pre-book";
+            let onClick = () => handlePrebook(item);
+            if (canBook) {
+              label = "Book";
+              onClick = () => handleBook(item);
+            } else if (canPre) {
+              label = "Pre-book";
+              onClick = () => handlePrebook(item);
+            }
 
             return (
               <div key={item.id} className="menu-card">
@@ -621,9 +722,9 @@ export default function EmployeePage() {
                       opacity: disabled ? 0.4 : 1,
                       cursor: disabled ? "not-allowed" : "pointer",
                     }}
-                    onClick={() => handlePrebook(item)}
+                    onClick={onClick}
                   >
-                    Pre-book
+                    {label}
                   </button>
                 </div>
               </div>
