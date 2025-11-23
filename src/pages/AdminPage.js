@@ -631,7 +631,25 @@ export default function AdminPage() {
             </div>
             <p className="small mt-8">{Object.entries(paymentCounts).length === 0 ? "No payments yet." : Object.entries(paymentCounts).map(([k,v]) => `${k}: ${v}`).join(" • ")}</p>
           </div>
+       
+
+	<div className="card">
+  	  <div className="card-header-row">
+            <div className="card-header-main">
+              <span className="metric-icon">💵</span>
+              <div className="card-title">Today's Revenue</div>
+           </div>
+           <div className="card-value">
+             ₹{Number(todayRevenue).toLocaleString()}
+          </div>
         </div>
+
+        <p className="small mt-8">
+          Revenue from all paid orders today.
+        </p>
+       </div>
+
+       </div>
 
         <div className="card-grid admin-card-grid" style={{ marginTop: 18 }}>
           <div className="card">
